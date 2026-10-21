@@ -1,0 +1,92 @@
+import pandas as pd                                          # pandas: works with tables
+from sklearn.model_selection import train_test_split         # splits data into train and test parts
+from sklearn.feature_extraction.text import TfidfVectorizer  # turns text into numbers
+from sklearn.naive_bayes import MultinomialNB                # model 1: Naive Bayes
+from sklearn.linear_model import LogisticRegression          # model 2: Logistic Regression
+from sklearn.metrics import accuracy_score                   # overall correctness
+from sklearn.metrics import classification_report            # precision, recall, F1
+from sklearn.metrics import confusion_matrix                 # shows which classes get mixed up
+
+# STEP 1: put the reviews into a table and count each group
+review_table = pd.DataFrame(reviews, columns=["text", "label"])   # turn the list into a table
+print("Reviews per group:")                                  # heading for the counts
+print(review_table["label"].value_counts())                  # how many reviews each group has
+print()                                                      # empty line for neatness
+
+# STEP 2: split into training and test sets (25 percent test, stratified)
+X = review_table["text"]                                     # X = the inputs (review text)
+y = review_table["label"]                                    # y = the correct answers (label)
+X_train, X_test, y_train, y_test = train_test_split(
+    X,                                                       # the review texts
+    y,                                                       # their correct labels
+    test_size=0.25,                                          # 25 percent goes to the hidden test set
+    random_state=42,                                         # fixed number so the split is repeatable
+    stratify=y,                                              # keep the same group mix in both parts
+)
+print("Training reviews:", len(X_train))                     # size of the training set
+print("Test reviews    :", len(X_test))                      # size of the test set
+print()                                                      # empty line
+
+# STEP 3: text to numbers with TF-IDF, with NO data leakage
+vectorizer = TfidfVectorizer()                               # create the text-to-numbers tool
+X_train_num = vectorizer.fit_transform(X_train)              # LEARN vocabulary from training text only, then convert it
+X_test_num = vectorizer.transform(X_test)                    # only CONVERT test text using the same vocabulary
+
+# STEP 4: train both models on the training data
+nb_model = MultinomialNB()                                   # create a Naive Bayes model
+nb_model.fit(X_train_num, y_train)                           # train Naive Bayes
+lr_model = LogisticRegression(max_iter=1000)                 # create a Logistic Regression model
+lr_model.fit(X_train_num, y_train)                           # train Logistic Regression
+
+# STEP 5: accuracy of both, and the full report of the better one
+nb_predictions = nb_model.predict(X_test_num)                # Naive Bayes predictions on hidden reviews
+lr_predictions = lr_model.predict(X_test_num)                # Logistic Regression predictions on hidden reviews
+nb_accuracy = accuracy_score(y_test, nb_predictions)         # Naive Bayes accuracy
+lr_accuracy = accuracy_score(y_test, lr_predictions)         # Logistic Regression accuracy
+print("Naive Bayes accuracy        :", round(nb_accuracy * 100, 1), "%")   # show model 1 score
+print("Logistic Regression accuracy:", round(lr_accuracy * 100, 1), "%")   # show model 2 score
+print()                                                      # empty line
+
+if lr_accuracy > nb_accuracy:                                # if Logistic Regression is strictly better
+    best_model = lr_model                                    # keep Logistic Regression as the best model
+    best_predictions = lr_predictions                        # keep its predictions
+    best_name = "Logistic Regression"                        # remember its name
+else:                                                        # otherwise (Naive Bayes better, or a tie)
+    best_model = nb_model                                    # keep Naive Bayes as the best model
+    best_predictions = nb_predictions                        # keep its predictions
+    best_name = "Naive Bayes"                                # remember its name
+
+print("Better model:", best_name, "(ties go to Naive Bayes)")   # say which model was chosen
+print()                                                      # empty line
+print(classification_report(y_test, best_predictions))       # precision, recall, F1 for every group
+
+# STEP 6: confusion matrix of the better model as a labelled table
+labels = ["Bug", "Feature", "Praise"]                        # fixed order for rows and columns
+matrix = confusion_matrix(y_test, best_predictions, labels=labels)   # build the confusion matrix
+table = pd.DataFrame(matrix, index=labels, columns=labels)   # turn it into a readable table
+table.index.name = "TRUE label"                              # label the rows
+table.columns.name = "PREDICTED label"                       # label the columns
+print(table)                                                 # show the table
+print()                                                      # empty line
+
+# STEP 7: a function that classifies any new review
+def classify_review(text):                                   # define a function that takes one review
+    text_num = vectorizer.transform([text])                  # convert with the SAME vocabulary (needs a list)
+    return best_model.predict(text_num)[0]                   # return the predicted label
+
+new_reviews = [                                              # three brand-new reviews
+    "the app keeps crashing when i pay",                     # expected: Bug
+    "please add a option to track my parcel on a map",       # expected: Feature
+    "really happy with the fast delivery and great prices",  # expected: Praise
+]
+for review in new_reviews:                                   # go through each new review
+    print(classify_review(review).ljust(8), "<-", review)    # show the predicted label next to the review
+
+# STEP 8: final answer
+# For the Bug group the product team needs HIGH RECALL.
+# Recall = out of all real bug reviews, how many did we catch.
+# A missed bug (low recall) means a crash or broken checkout stays hidden, so users
+# keep suffering and the company loses orders.
+# A false alarm (low precision) only costs an engineer a few minutes checking a review
+# that was not really a bug. So missing a real bug is the more expensive mistake.
+# (Precision should still be reasonable so the engineers are not flooded with false alarms.)
